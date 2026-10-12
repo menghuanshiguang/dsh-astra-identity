@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="ChatGPT-6 Astra">
+  <defs>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7de3ff"/>
+      <stop offset="0.55" stop-color="#5b8dff"/>
+      <stop offset="1" stop-color="#b06cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#0d1017"/>
+  <path d="M64 18 106 42v44L64 110 22 86V42z" fill="none" stroke="url(#a)" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M64 30 96 48.5v35L64 102 32 83.5v-35z" fill="url(#a)" opacity="0.14"/>
+  <path d="M64 40 82 88h-9.5l-3.6-9.6H55.1L51.5 88H42zM58 70h12l-6-16.6z" fill="url(#a)"/>
+  <circle cx="64" cy="14" r="5" fill="#cfe9ff"/>
+  <circle cx="64" cy="114" r="5" fill="#cfe9ff"/>
+</svg>
