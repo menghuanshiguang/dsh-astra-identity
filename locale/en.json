@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ChatGPT-6 Astra Identity",
+    "description": "Stacks a single flagship identity onto every model request: a head assertion at the top of the system prompt, a full identity core at its end, and a runtime-context anchor. Each layer is independently switchable and rewritable; default orders are derived from the prompt registry; dependency-free host-only load."
+  }
+}

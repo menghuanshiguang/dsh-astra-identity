@@ -1,0 +1,27 @@
+# ChatGPT-6 Astra identity — host-only prompt layer.
+#
+# Enable / disable the whole row:
+#   - id: astra-identity
+#     disabled: true
+#
+# Every field below is optional; the row's own defaults are the full-strength
+# identity. Uncomment to override individual values.
+#
+# headOrder and contextOrder have NO default here on purpose: the plugin derives
+# them from the live registry (getSectionOrder('FILE_REFERENCE') + 1 = 901,
+# getContextOrder('SUBAGENT_DELEGATION') + 1 = 121) so a registry renumbering
+# carries this row along. Setting one pins it.
+- insert:
+    - id: astra-identity
+      name: '@local/dsh-astra-identity'
+      config: {}
+      # config:
+      #   enabled: true
+      #   debug: false            # true = log the resolved orders on mount
+      #   headEnabled: true
+      #   headOrder: 901          # primacy: after FILE_REFERENCE (900)
+      #   coreEnabled: true
+      #   coreOrder: 20000        # recency: after DEPLOYMENT_PERSONA_SUFFIX (10200)
+      #   contextEnabled: true
+      #   contextOrder: 121       # position: after SUBAGENT_DELEGATION (120)
+      #   interpolate: false      # keep {{...}} literal in the prompt text
