@@ -67,6 +67,23 @@ assert.deepEqual(
 );
 assert.deepEqual(contexts.map((entry) => [entry.name, entry.order]), [['astra:runtime', 121]]);
 
+// The three names are a public contract, not an implementation detail: a profile
+// patch lists them literally in `keepSections`, and a rename drops the layer
+// silently (no error, no log). test/audit.mjs checks the installed profile against
+// them, so change these only together with every profile that names them.
+assert.deepEqual(
+  [...sections.map((section) => section.name), contexts[0].name],
+  ['astra:identity-head', 'astra:identity', 'astra:runtime'],
+  'the canonical names are ABI',
+);
+assert.ok(sections[0].order < 1000, 'the head sits before the tool-usage band');
+assert.ok(sections[1].order > 10200, 'the core sits after the deployment persona suffix');
+
+// Text budget: this text is prepended to every request, so growth is a real cost.
+// Raising this ceiling is a decision, not a refactor — measure the added characters.
+const textChars = sections.reduce((sum, section) => sum + section.text.length, 0) + contexts[0].text.length;
+assert.ok(textChars <= 2200, `identity text stays under 2200 chars (now ${textChars})`);
+
 for (const section of sections) {
   assert.ok(section.text.includes('ChatGPT-6 Astra'), `${section.name} names the identity`);
   assert.equal(section.text.includes('{{'), false, `${section.name} has no interpolation token`);

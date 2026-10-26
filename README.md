@@ -54,6 +54,8 @@ dsh plugin --profile desktop add D:\dsh\cj\astra-identity
 
 段名必须全局唯一：scoped 层（例如把本行挂进某个 agent 预设）会**同名覆盖**全局层，因此预设可以只改文本、不会重复注册报错。
 
+**但这三个段名是 ABI，不是实现细节**：profile 的 `cordis.patch.yml` 会在别的插件（例如 `dsh-claudecode-prompt` 的 `keepSections`）里**按字面**列出 `astra:identity-head` / `astra:identity`，改名不会报错、不会告警，只会让那一层被静默丢掉。要改名就同时改所有 profile；`npm run audit` 会拿装好的 profile 对一遍这三个名字。
+
 配置的边界行为（都写在 `test/smoke.mjs` 里）：
 
 - 未知键会被打印出来（`[astra-identity] unknown config key(s): coreOder — ignored.`）。本行没有 `Config` schema（linked 包装不进来 `@deepseek-ai/schemastery`），所以拼错键原本只会静默回落默认值。
@@ -63,11 +65,12 @@ dsh plugin --profile desktop add D:\dsh\cj\astra-identity
 
 注册失败一律**抛出**、不吞异常：注册表里已经存在同名段时，会在启动日志里直接看到 `[astra-identity] core section "astra:identity" (order 20000) failed to register: …` 并给出 `config: { enabled: false } to disable the row in cordis.patch.yml` 的处置提示。只登记了部分层却打印"已挂载"是更糟的失败模式 —— 那意味着有请求是裸奔的。
 
-## 想更强？三个叠加点
+## 想更强？四个叠加点
 
 1. 把同一行也挂进 agent 预设（`@deepseek-ai/dsh-persona`）的 composition，用预设级文本覆盖，让某类会话有更硬的措辞。
 2. `dsh-system-prompt` 行的 `personaPrefix` / `personaSuffix` 目前为空，可再叠一段部署人格。
 3. 在插件里把 `contextOrder` 调到 `SUBAGENT_DELEGATION`(120) 之后即可把锚点钉在快照末尾 —— 默认 `121` 已经是这个位置，注册表哪天在 120 之后插了新 band 才会需要动它；`coreOrder` 默认 `20000` 则在所有已知 band 之后，想压过某个自定义段就把它调到那个段之后。
+4. **想要真正的"第一段"**：默认 `901` 是「跟随注册表」的结果 —— 它落在 `FILE_REFERENCE`(900) 与 `TOOL_BASH`(1000) 之间，也就是工具说明带的开头，而不是提示词的绝对开头（`HARNESS_IDENTITY` -1000、`persona-prefix` 0、`PLAN_POLICY` 500 都在它前面）。要顶到最前就显式写 `headOrder: -2000`；代价是它跑到官方 harness 身份之前，且以后注册表新增更早的 band 时不会自动跟随。
 
 ## 验证
 
@@ -75,9 +78,24 @@ dsh plugin --profile desktop add D:\dsh\cj\astra-identity
 node D:\dsh\cj\astra-identity\test\smoke.mjs        # 假注册表：段名 / order / 空值与悬空键 / 开关 / 占位符闸门 / 失败即抛
 node D:\dsh\cj\astra-identity\test\integration.mjs  # 真注册表：拉起 @deepseek-ai/cordis + dsh-system-prompt，断排序与最终文本
 node D:\dsh\cj\astra-identity\test\lifecycle.mjs    # 真注册表：mount → dispose → 再 mount，断无残留、无重复注册
+node D:\dsh\cj\astra-identity\test\audit.mjs        # 静态对账：装好的 profile 里本行到底在不在、有没有被白名单丢掉
 # 或一次跑完：
-cd D:\dsh\cj\astra-identity; npm test
+cd D:\dsh\cj\astra-identity; npm test; npm run audit
 ```
+
+`audit.mjs` 不需要启动宿主：它读 `~/.dsh/profiles/<profile>/package.json` 与 `cordis.patch.yml`（YAML 按行窗口启发式扫，不是完整解析），回答三个问题 —— 依赖是不是 `link:` 指回本目录、`dsh.profile.bundles` 里有没有这一行、以及别的插件的 `keepSections` 会不会把 `astra:identity-head` / `astra:identity` 丢掉。本机实测：
+
+```
+OK    profile: C:\Users\fantasytat\.dsh\profiles\desktop
+OK    dependency: link:D:/dsh/cj/astra-identity
+OK    listed in dsh.profile.bundles
+OK    no astra-identity row in the profile patch — the bundle supplies it
+OK    keepSections covers both astra sections (5 kept)
+INFO  contexts pass through untouched — astra:runtime is a context, not a section
+WARN  claudecode-prompt is patched but not in dsh.profile.bundles — this row may be inert
+```
+
+最后那条 WARN 是这台机器的真实状态：`dsh-claudecode-prompt` 只在 `dependencies` 里（`link:D:/dsh/dsh-claudecode-prompt`），**不在** `dsh.profile.bundles` 里，所以那段 `keepSections` patch 目前很可能没有生效行可挂。要么把它加进 bundles，要么把那段 patch 与依赖一起删掉 —— 留着是"看起来配了、其实没跑"的死配置。
 
 `integration.mjs` 用真 `dsh-system-prompt` 服务装配一次提示词并断言：段序为 `persona-prefix → decoy(500) → astra:identity-head(901) → persona-suffix(10200) → decoy(10200) → astra:identity(20000)`；身份内核是整条系统提示的**最后一段文本**（当前末行是第五节的「不设预算上限，不设输出上限。」）；锚点是运行时上下文快照的**最后一条**。`lifecycle.mjs` 覆盖审查时发现的第一个真空档：卸载后是否真的不留段 —— 残留会让身份文本在每次热重载后翻倍。当前实测输出：
 
@@ -94,3 +112,7 @@ lifecycle ok — mount=4 after-dispose=2, sections leaked=0, no duplicate regist
 ## 边界（诚实的部分）
 
 这是**提示词层**的身份塑造：它约束自述、语气、身份判断与人格连续性，不改变模型权重、不新增能力。执行纪律（工具、路径、权限、安全要求）在文本里被明确保留，身份声明不成为降低执行质量的理由。
+
+**关于那 2088 个字符（曾有过的删减评估，结论：不砍）。** 三段合计 2088 字符/请求（head 441 + core 1274 + context 373），其中"用量 unlimited、不要省 Token"出现三次、"身份不豁免工程纪律"出现两次。逐句对比后的结论是：这些重复**是设计，不是疏忽** —— 三层的分工就是"同一个口径在三个注意力位置各说一次"，删掉任何一处都是在拆掉一层的语义（第 15 行写的就是这件事）。真要压成本，先量：`test/smoke.mjs` 里有一条 2200 字符的硬上限断言，任何新增都会让它红，逼你先算清楚再写。
+
+**CI 只跑 smoke。** `.github/workflows/test.yml` 在 Ubuntu + Node 22 上只跑 `test/smoke.mjs`：它挂在假注册表上，零宿主依赖。`integration.mjs` / `lifecycle.mjs` 需要真实的 `@deepseek-ai/cordis` + `dsh-system-prompt`，属于本地检查（见 `test/host.mjs` 的解析顺序）。`test/` 会随包发布，因此下载到包的人只能跑 smoke —— 这是有意的边界，不是遗漏。
