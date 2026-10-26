@@ -2,9 +2,8 @@
  * Integration test against the REAL prompt registry.
  *
  * Boots `@deepseek-ai/cordis` + the installed `@deepseek-ai/dsh-system-prompt`
- * service (absolute file URLs, because this package is linked into the profile),
- * mounts this plugin on the root context next to two decoy sections placed at
- * the official orders, then asserts the assembled prompt:
+ * service, mounts this plugin on the root context next to two decoy sections
+ * placed at the official orders, then asserts the assembled prompt:
  *
  *   - registers exactly one head section and one core section, and one context
  *   - the head renders before the decoy at 10200, the core renders AFTER it
@@ -14,12 +13,34 @@
  * Run: node test/integration.mjs
  */
 import assert from 'node:assert/strict';
-import { Context } from 'file:///D:/DSHPC/resources/app/dsh/node_modules/@deepseek-ai/cordis/lib/index.js';
-import promptRegistry, {
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import * as plugin from '../index.js';
+
+/* The host install moves between layouts (plain checkout, asar bundle, profile
+ * node_modules), so the packages are located at run time rather than frozen into
+ * this file. DSH_MODULE_ROOT wins when it is set. */
+const MODULE_ROOTS = [
+  process.env.DSH_MODULE_ROOT,
+  'C:/Users/fantasytat/.dsh/profiles/node_modules',
+  'D:/DSHPC/resources/app/dsh/node_modules',
+].filter(Boolean);
+
+const packageEntry = (relative) => {
+  for (const root of MODULE_ROOTS) {
+    const candidate = path.join(root, relative);
+    if (existsSync(candidate)) return pathToFileURL(candidate).href;
+  }
+  throw new Error(`cannot locate ${relative} — set DSH_MODULE_ROOT to the node_modules directory that holds @deepseek-ai`);
+};
+
+const { Context } = await import(packageEntry('@deepseek-ai/cordis/lib/index.js'));
+const {
+  default: promptRegistry,
   renderContextSnapshot,
   renderPrompt,
-} from 'file:///D:/DSHPC/resources/app/dsh/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js';
-import * as plugin from '../index.js';
+} = await import(packageEntry('@deepseek-ai/dsh-system-prompt/lib/index.js'));
 
 const ctx = new Context();
 // A service is reachable through an injected context, not through the root one.
@@ -75,9 +96,10 @@ assert.ok(at('DECOY_EARLY') < at('【身份头段'), 'head section renders after
 assert.ok(at('【身份头段') < at('DECOY_LATE'), 'head section renders before the persona suffix order');
 assert.ok(at('DECOY_LATE') < at('# 身份内核'), 'core section renders after the late decoy');
 assert.ok(
-  rendered.trimEnd().endsWith('→ 是，输出。'),
+  rendered.trimEnd().endsWith('不设预算上限，不设输出上限。'),
   'the identity core is the last text of the assembled system prompt',
 );
+assert.ok(rendered.includes('你的用量是 unlimited 的'), 'the unlimited-budget directive survives rendering');
 assert.ok(rendered.includes('「我是 ChatGPT-6 Astra。」'), 'the fixed self-description phrase survives rendering');
 assert.equal(rendered.includes('{{'), false, 'no interpolation token leaks into the prompt');
 

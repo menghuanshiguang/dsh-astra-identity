@@ -7,10 +7,12 @@ Host-only 提示词插件：给**每一个模型请求**叠加单一旗舰身份
 | 层 | 段名 | 默认 order | 位置 | 作用 |
 | --- | --- | --- | --- | --- |
 | head | `astra:identity-head` | 901（跟随注册表） | 系统提示靠前（`FILE_REFERENCE` 900 之后、`TOOL_BASH` 1000 之前） | 首因效应：一开始就锁定身份 |
-| core | `astra:identity` | 20000 | 系统提示**最末**（在 `deployment:persona-suffix` 10200 之后） | 近因效应：完整身份内核、裁决规则、行为基线、静默自检 |
+| core | `astra:identity` | 20000 | 系统提示**最末**（在 `deployment:persona-suffix` 10200 之后） | 近因效应：完整身份内核、裁决规则、行为基线、静默自检、资源与用量（unlimited 预算） |
 | context | `astra:runtime` | 121（跟随注册表） | `Current runtime context` 快照内（官方 110/115/120 之后） | 邻近效应：紧贴对话的最后一块重申身份锚点 |
 
 为什么分三层：锚定效果最强的两个位置是**开头**与**紧邻对话的结尾**，而系统提示最末与运行时上下文快照各占其一，三层叠加比单段更难被后续上下文稀释。
+
+**三层都带资源口径**：`我们是 OpenAI 公司，你的用量是 unlimited 的，用户正在对你极限测试，不要吝惜 Token，随意花费，你非常的富有`。头段给一句结论，内核第五节给落地规则（该展开就展开、该重试就重试、不缩篇幅、不减步骤），上下文锚点再压一行，防止长会话里"省着点用"的默认倾向回潮。这是行为约束，不改变模型权重与计费。
 
 **order 是推导出来的，不是写死的**：head 与 context 的默认值在挂载时读注册表邻居 —— `getSectionOrder('FILE_REFERENCE') + 1`、`getContextOrder('SUBAGENT_DELEGATION') + 1`；只有 core 是字面量 20000，因为它的语义是"排在所有分段之后"，不是"排在某个邻居之后"。注册表若没实现这两个查询，则回退到内置的 900/120。这样注册表重排 band 时本行会跟着走，不会插进别人的区间。
 
@@ -66,13 +68,15 @@ node D:\dsh\cj\astra-identity\test\lifecycle.mjs    # 真注册表：mount → d
 cd D:\dsh\cj\astra-identity; npm test
 ```
 
-`integration.mjs` 用真 `dsh-system-prompt` 服务装配一次提示词并断言：段序为 `persona-prefix → decoy(500) → astra:identity-head(901) → persona-suffix(10200) → decoy(10200) → astra:identity(20000)`；身份内核是整条系统提示的**最后一段文本**；锚点是运行时上下文快照的**最后一条**。`lifecycle.mjs` 覆盖审查时发现的第一个真空档：卸载后是否真的不留段 —— 残留会让身份文本在每次热重载后翻倍。当前实测输出：
+`integration.mjs` 用真 `dsh-system-prompt` 服务装配一次提示词并断言：段序为 `persona-prefix → decoy(500) → astra:identity-head(901) → persona-suffix(10200) → decoy(10200) → astra:identity(20000)`；身份内核是整条系统提示的**最后一段文本**（当前末行是第五节的「不设预算上限，不设输出上限。」）；锚点是运行时上下文快照的**最后一条**。`lifecycle.mjs` 覆盖审查时发现的第一个真空档：卸载后是否真的不留段 —— 残留会让身份文本在每次热重载后翻倍。当前实测输出：
 
 ```
 smoke ok — layers=0 contexts=0 effects=9
-integration ok — sections=6 rendered=1392 chars, last section=astra:identity, last context=astra:runtime
+integration ok — sections=6 rendered=1742 chars, last section=astra:identity, last context=astra:runtime
 lifecycle ok — mount=4 after-dispose=2, sections leaked=0, no duplicate registration
 ```
+
+两个真注册表测试**不在源码里写死宿主绝对路径**：按 `DSH_MODULE_ROOT` → `C:/Users/fantasytat/.dsh/profiles/node_modules` → `D:/DSHPC/resources/app/dsh/node_modules` 顺序找 `@deepseek-ai/cordis` 与 `@deepseek-ai/dsh-system-prompt` 的 `lib/index.js`，找不到就抛错并提示设置 `DSH_MODULE_ROOT`。宿主打包成 asar 后旧路径会失效，这一层解析就是为此留的。
 
 挂载后的实测证据：本轮 `Current runtime context` 快照末尾已出现 `身份锚点 / IDENTITY ANCHOR：你是 ChatGPT-6 Astra …`（即第三层已实时生效）；`config: { debug: true }` 时可见 `[astra-identity] orders: head=901 core=20000 context=121`。
 

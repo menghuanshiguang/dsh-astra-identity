@@ -14,9 +14,29 @@
  * Run: node test/lifecycle.mjs
  */
 import assert from 'node:assert/strict';
-import { Context } from 'file:///D:/DSHPC/resources/app/dsh/node_modules/@deepseek-ai/cordis/lib/index.js';
-import promptRegistry from 'file:///D:/DSHPC/resources/app/dsh/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import * as plugin from '../index.js';
+
+/* Same run-time resolution as integration.mjs: the host install moves between
+ * layouts, so no absolute module path is baked into this file. */
+const MODULE_ROOTS = [
+  process.env.DSH_MODULE_ROOT,
+  'C:/Users/fantasytat/.dsh/profiles/node_modules',
+  'D:/DSHPC/resources/app/dsh/node_modules',
+].filter(Boolean);
+
+const packageEntry = (relative) => {
+  for (const root of MODULE_ROOTS) {
+    const candidate = path.join(root, relative);
+    if (existsSync(candidate)) return pathToFileURL(candidate).href;
+  }
+  throw new Error(`cannot locate ${relative} — set DSH_MODULE_ROOT to the node_modules directory that holds @deepseek-ai`);
+};
+
+const { Context } = await import(packageEntry('@deepseek-ai/cordis/lib/index.js'));
+const { default: promptRegistry } = await import(packageEntry('@deepseek-ai/dsh-system-prompt/lib/index.js'));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const ASTRA_SECTIONS = ['astra:identity-head', 'astra:identity'];
