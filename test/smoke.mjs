@@ -9,6 +9,7 @@ import { apply, inject, name } from '../index.js';
 const sections = [];
 const contexts = [];
 const effects = [];
+const logs = [];
 
 const prompt = {
   systemPrompt: {
@@ -29,7 +30,11 @@ const prompt = {
     },
   },
   logger() {
-    return { info() {} };
+    return {
+      info(_format, message) {
+        logs.push(String(message));
+      },
+    };
   },
   effect(fn, label) {
     effects.push(label);
@@ -108,6 +113,62 @@ contexts.length = 0;
 apply(ctx, { enabled: false });
 assert.equal(sections.length, 0);
 assert.equal(contexts.length, 0);
+
+// YAML 1.2 turns `enabled: no` into the STRING "no", and Boolean('no') is true —
+// the row would stay mounted while its author believed it was off.
+for (const falsy of ['no', 'off', 'n', 'FALSE', '0', '']) {
+  sections.length = 0;
+  contexts.length = 0;
+  apply(ctx, { enabled: falsy });
+  assert.equal(sections.length + contexts.length, 0, `enabled:${JSON.stringify(falsy)} stays unmounted`);
+}
+
+// A bare `headOrder:`/`contextOrder:` is null or "", which means "not set" — not
+// order 0 (the top of the prompt, ahead of the deployment persona).
+for (const unset of [null, '', '   ']) {
+  sections.length = 0;
+  contexts.length = 0;
+  apply(ctx, { headOrder: unset, contextOrder: unset });
+  assert.deepEqual(
+    sections.map((section) => [section.name, section.order]),
+    [
+      ['astra:identity-head', 901],
+      ['astra:identity', 20000],
+    ],
+    `headOrder:${JSON.stringify(unset)} falls back to the derived neighbour`,
+  );
+  assert.deepEqual(contexts.map((entry) => entry.order), [121]);
+}
+
+// A typo in a key is silently ignored without a schema, so it must at least be
+// reported: `coreOder` leaves the core at its default order.
+sections.length = 0;
+contexts.length = 0;
+logs.length = 0;
+apply(ctx, { coreOder: 5 });
+assert.ok(
+  logs.some((message) => message.includes('unknown config key(s): coreOder')),
+  `an unknown key is reported (logs: ${JSON.stringify(logs)})`,
+);
+assert.deepEqual(
+  sections.map((section) => section.order),
+  [901, 20000],
+);
+
+// The registry interpolates every section unconditionally (the `interpolate` flag
+// never reaches the rendered entry), so a placeholder must fail at MOUNT time
+// instead of throwing on every request render.
+assert.throws(
+  () => apply(ctx, { headText: 'X {{missing_var}} Y' }),
+  /placeholder.*interpolate: true/s,
+  'a placeholder in the text is rejected at mount',
+);
+assert.throws(() => apply(ctx, { contextText: 'X {{missing_var}} Y' }), /placeholder/);
+
+sections.length = 0;
+contexts.length = 0;
+apply(ctx, { headText: 'X {{declared_opt_in}} Y', interpolate: true });
+assert.equal(sections.length, 2, 'interpolate:true keeps the placeholder path open on purpose');
 
 // A layer that cannot register fails loud — it must never report success.
 assert.throws(

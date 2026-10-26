@@ -13,34 +13,17 @@
  * Run: node test/integration.mjs
  */
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import * as plugin from '../index.js';
+import { hostEntry } from './host.mjs';
 
 /* The host install moves between layouts (plain checkout, asar bundle, profile
- * node_modules), so the packages are located at run time rather than frozen into
- * this file. DSH_MODULE_ROOT wins when it is set. */
-const MODULE_ROOTS = [
-  process.env.DSH_MODULE_ROOT,
-  'C:/Users/fantasytat/.dsh/profiles/node_modules',
-  'D:/DSHPC/resources/app/dsh/node_modules',
-].filter(Boolean);
-
-const packageEntry = (relative) => {
-  for (const root of MODULE_ROOTS) {
-    const candidate = path.join(root, relative);
-    if (existsSync(candidate)) return pathToFileURL(candidate).href;
-  }
-  throw new Error(`cannot locate ${relative} — set DSH_MODULE_ROOT to the node_modules directory that holds @deepseek-ai`);
-};
-
-const { Context } = await import(packageEntry('@deepseek-ai/cordis/lib/index.js'));
+ * node_modules), so the packages are located at run time by ./host.mjs. */
+const { Context } = await import(hostEntry('@deepseek-ai/cordis/lib/index.js'));
 const {
   default: promptRegistry,
   renderContextSnapshot,
   renderPrompt,
-} = await import(packageEntry('@deepseek-ai/dsh-system-prompt/lib/index.js'));
+} = await import(hostEntry('@deepseek-ai/dsh-system-prompt/lib/index.js'));
 
 const ctx = new Context();
 // A service is reachable through an injected context, not through the root one.

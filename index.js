@@ -153,13 +153,33 @@ const DEFAULTS = {
   interpolate: false,
 };
 
-/** Coerce a row config value to a boolean, honoring a string 'false'. */
+/**
+ * Coerce a row config value to a boolean.
+ *
+ * The string allow-list matters because `cordis.patch.yml` is YAML: a hand-written
+ * `enabled: no` is not a boolean to a YAML 1.2 parser, it is the string "no", and
+ * `Boolean('no')` is `true` — the row would stay mounted while its author believed
+ * it was off. Everything else keeps plain JS truthiness (`null` stays false).
+ */
 function bool(value) {
-  return value !== false && value !== 'false' && value !== 0 && value !== '0';
+  if (typeof value === 'string') {
+    const text = value.trim().toLowerCase();
+    return !(text === '' || text === 'false' || text === '0' || text === 'off' || text === 'no' || text === 'n');
+  }
+  return Boolean(value);
 }
 
-/** Coerce a row config value to a finite number, falling back to the default. */
+/**
+ * Coerce a row config value to a finite number, falling back to the default.
+ *
+ * `null` and `""` mean "not set", not zero: `Number(null)`, `Number('')` and
+ * `Number(' ')` are all `0`, so a bare `headOrder:` line in YAML would otherwise
+ * pin the section to order 0 — the very top of the prompt, ahead of the deployment
+ * persona — instead of falling back to the derived neighbour.
+ */
 function num(value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string' && value.trim() === '') return fallback;
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -169,11 +189,59 @@ function str(value, fallback) {
   return typeof value === 'string' && value.length > 0 ? value : fallback;
 }
 
+const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
+
+/**
+ * Report config keys this row does not read.
+ *
+ * There is no `Config` schema on this row (a bare `@deepseek-ai/schemastery` import
+ * would not resolve from a linked package directory), so an unknown key silently
+ * falls back to the default — `coreOder: 5` would leave the core at 20000 with no
+ * sign that the intent was ignored. This one line turns that silence into a
+ * diagnostic, which is what the rest of this file already demands of failures.
+ * @param log - diagnostics sink.
+ * @param raw - the row config as written in `cordis.patch.yml`.
+ */
+function warnUnknownKeys(log, raw) {
+  const unknown = Object.keys(raw).filter((key) => !KNOWN_KEYS.has(key));
+  if (unknown.length === 0) return;
+  log(`${TAG} unknown config key(s): ${unknown.join(', ')} — ignored. Known keys: ${[...KNOWN_KEYS].join(', ')}`);
+}
+
 /**
  * The plugin's own `cordis.patch.yml` snippet, so a failure diagnostic points at
  * the exact row to edit instead of only naming the layer.
  */
 const CONFIG_HINT = "config: { enabled: false } to disable the row in cordis.patch.yml";
+
+/**
+ * Placeholder syntax the prompt renderer always processes.
+ *
+ * `dsh-system-prompt` interpolates every section and context on each request
+ * (`renderPrompt` / `renderContextSnapshot` map through `interpolate(...)`
+ * unconditionally) and an unknown variable throws while the prompt is being built.
+ * The per-entry `interpolate` flag this plugin passes is not part of the assembled
+ * entry — the registry reduces each entry to `{ name, text }` — so it cannot switch
+ * that off. A brace pair in the text therefore turns every request into a failure
+ * at render time; this guard moves the failure to mount time, where the diagnostic
+ * can name the row.
+ */
+const PLACEHOLDER = /\{\{[^}]*\}\}/;
+
+/**
+ * Reject text that the renderer would choke on, before it is registered.
+ * @param text - the section or context text.
+ * @param label - diagnostics label for the layer.
+ * @param interpolate - whether the row asked for interpolation on purpose.
+ */
+function assertRenderable(text, label, interpolate) {
+  if (interpolate || !PLACEHOLDER.test(text)) return;
+  throw new Error(
+    `${TAG} ${label} text contains a {{...}} placeholder: this registry interpolates every section unconditionally, ` +
+      'so literal braces cannot be preserved and an unregistered variable fails on every request. ' +
+      'Remove the braces, or set config: { interpolate: true } if the variable really is registered.',
+  );
+}
 
 /** Render an error for a diagnostic line without assuming it is an `Error`. */
 function errorHint(error) {
@@ -216,6 +284,7 @@ function makeLog(ctx) {
  * @returns the section's disposer.
  */
 function addSection(ctx, config, label, entry) {
+  assertRenderable(entry.text, `${label} section`, config.interpolate);
   try {
     return ctx.effect(
       () =>
@@ -240,6 +309,7 @@ function addSection(ctx, config, label, entry) {
  * @returns the anchor's disposer.
  */
 function addContext(ctx, config) {
+  assertRenderable(config.contextText, 'context anchor', config.interpolate);
   try {
     return ctx.effect(
       () =>
@@ -293,6 +363,8 @@ function mount(ctx, config, log) {
  */
 export function apply(ctx, config) {
   const raw = config && typeof config === 'object' ? config : {};
+  const log = makeLog(ctx);
+  warnUnknownKeys(log, raw);
   const defaults = DEFAULTS;
   const normalized = {
     enabled: bool(raw.enabled === undefined ? defaults.enabled : raw.enabled),
@@ -313,10 +385,10 @@ export function apply(ctx, config) {
   };
 
   if (!normalized.enabled) {
-    if (normalized.debug) makeLog(ctx)(`${TAG} disabled by config`);
+    if (normalized.debug) log(`${TAG} disabled by config`);
     return;
   }
 
-  mount(ctx, normalized, makeLog(ctx));
-  if (normalized.debug) makeLog(ctx)(`${TAG} active: ChatGPT-6 Astra identity layers mounted`);
+  mount(ctx, normalized, log);
+  if (normalized.debug) log(`${TAG} active: ChatGPT-6 Astra identity layers mounted`);
 }
